@@ -97,8 +97,12 @@ public:
 	static constexpr int frame_height = FRAME_HEIGHT;
 	static constexpr bool debug_mode = DEBUG;
 
-	// the frame to be processed must be loaded to this array
-	uint8_t frame[FRAME_HEIGHT][FRAME_WIDTH];
+	// the frame to be processed must be loaded to this array. Force the
+	// alignment to 4 bytes to make sure the frame can be DMA'ed at 32 bits
+	// into this buffer
+	struct Frame {
+		uint8_t data[FRAME_HEIGHT][FRAME_WIDTH] __attribute__((aligned(4)));
+	};
 
 	// the result of the frame processing is stored here
 	aruco_t result[MAX_ARUCO_COUNT];
@@ -109,11 +113,11 @@ public:
 
 
 	// process the frame in "frame" and fill in the aruco information
-	void process(void) {
+	void process(Frame &frame) {
 		debug_clear_frame();
-		compute_local_contrast();
-		build_segments();
-		process_finish();
+		compute_local_contrast(frame);
+		build_segments(frame);
+		process_finish(frame);
 	}
 
 protected:
@@ -148,24 +152,31 @@ protected:
 	// looking like arucos at all
 	static constexpr int MAX_ARUCOS = USABLE_SIZE / 850;
 
-	// maximum number of segments we can find in one frame. We use only 16
-	// bit integer to reference a segment, so we can not have more than 64k
-	static constexpr int MAX_SEGMENTS = (USABLE_SIZE / 50 < 65535) ? USABLE_SIZE / 50 : 65535;
+	// maximum number of segments we can find in one frame
+	static constexpr int MAX_SEGMENTS = USABLE_SIZE / 50;
 	static constexpr int MAX_SEGS_PER_LINE = USABLE_WIDTH / 6;
 
 
 	// segment processing data ---------------------------------------------
 
+	// HI-RES: to save space the segment length type depends on the image size
+	using length_t = std::conditional_t<(FRAME_WIDTH < 256), uint8_t, uint16_t>;
+
+	// HI-RES: to save space the maximum number of segments depends on the
+	// image size. This is just an heuristic that means we can support an
+	// image tha has a segment every 4 pixels, which would be quite dense
+	using segment_index_t = std::conditional_t<(MAX_SEGMENTS < 32768), int16_t, int32_t>;
+
 	struct segment_t {
 		uint16_t y;
 		uint16_t start;
-		uint8_t length;	// HI-RES: we must support bigger lengths
+		length_t length;
 		uint8_t aruco;
-		int16_t next;	// HI-RES: we may need to support more than 64k segments
+		segment_index_t next;
 	};
 
 	struct line_segments_t {
-		uint16_t idx[MAX_SEGS_PER_LINE];
+		segment_index_t idx[MAX_SEGS_PER_LINE];
 		uint16_t count;
 	};
 
@@ -218,7 +229,7 @@ protected:
 		return lc_sum[y][x];
 	}
 
-	void compute_local_contrast(void)
+	void compute_local_contrast(Frame &frame)
 	{
 		uint32_t total, gy, gx, ix, iy, x, y, avg;
 
@@ -230,7 +241,7 @@ protected:
 
 				for (iy = 0; iy < CELL; iy++, y++) {
 					for (ix = 0; ix < CELL; ix++, x++)
-						total += frame[y][x];
+						total += frame.data[y][x];
 					x -= CELL;
 				}
 
@@ -278,9 +289,9 @@ protected:
 	}
 
 
-	int16_t alloc_segment(void)
+	segment_index_t alloc_segment(void)
 	{
-		int16_t ret;
+		segment_index_t ret;
 
 		if (free_segment == -1) {
 			if (segment_count >= MAX_SEGMENTS)
@@ -296,7 +307,7 @@ protected:
 		return ret;
 	}
 
-	void dealloc_segment(int16_t idx)
+	void dealloc_segment(segment_index_t idx)
 	{
 		debug("dealloc segment: %d, free %d\n", idx, free_segment);
 		segments[idx].next = free_segment;
@@ -444,13 +455,6 @@ protected:
 		segment_t *seg, *new_seg;
 		int i, new_seg_idx, aruco_idx;
 
-		// don't accept segments larger than 255 pixels: we would need
-		// more than one byte to store them and they are unlikely to be
-		// from a valid aruco as it would have to fill almost the entire
-		// frame
-		if (x2 - x1 > 255)
-			return;
-
 		mono_frame_draw_black_segment(y, x1, x2);
 
 		new_seg_idx = alloc_segment();
@@ -492,7 +496,7 @@ protected:
 		}
 	}
 
-	void build_segments(void)
+	void build_segments(Frame &frame)
 	{
 		uint32_t x, y, ix, py, px, avg, edge;
 		int segment_start;
@@ -514,7 +518,7 @@ protected:
 			shift = 0xAA;
 
 			px = FRAME_MARGIN_X;
-			frame_ptr = &frame[py][px];
+			frame_ptr = &frame.data[py][px];
 			for (x = 0; x < GRID_X; x++) {
 				avg = ptr[x];
 
@@ -713,21 +717,21 @@ protected:
 		return false;
 	}
 
-	int mono_frame_pixel(uint32_t x, uint32_t y) {
+	int mono_frame_pixel(uint32_t x, uint32_t y, Frame &frame) {
 		x -= FRAME_MARGIN_X;
 		if (x >= USABLE_WIDTH)
 			return 0;
 		y -= FRAME_MARGIN_Y;
 		if (y >= USABLE_HEIGHT)
 			return 0;
-		return frame[y + FRAME_MARGIN_Y][x + FRAME_MARGIN_X] > lc_grid[y / CELL][x / CELL];
+		return frame.data[y + FRAME_MARGIN_Y][x + FRAME_MARGIN_X] > lc_grid[y / CELL][x / CELL];
 	}
 
 	// use the corner points to sample the aruco bits and identify it.
 	// Rotate the corners so that pt[0] is always the top left corner of the
 	// aruco and the other corners are sorted clockwise (pt[1] is top right,
 	// etc.)
-	bool identify_and_rotate(aruco_t *a) {
+	bool identify_and_rotate(aruco_t *a, Frame &frame) {
 		pt2d_t vec[2], e[2], v, p;
 		int i, j, ix, iy;
 		int b, bit, b_idx, sample;
@@ -754,7 +758,7 @@ protected:
 				if (iy < 0 || iy >= FRAME_HEIGHT)
 					return false;
 
-				sample = mono_frame_pixel(ix, iy);
+				sample = mono_frame_pixel(ix, iy, frame);
 
 				if (i < ARUCO_BORDER || i >= (TOTAL_BITS - ARUCO_BORDER) ||
 				    j < ARUCO_BORDER || j >= (TOTAL_BITS - ARUCO_BORDER)) {
@@ -788,7 +792,7 @@ protected:
 	}
 
 
-	int compute_aruco_points(void)
+	int compute_aruco_points(Frame &frame)
 	{
 		int i, e, b, total, i1, i2, b0, b1, bucks[4];
 		line_fit_t fit;
@@ -881,7 +885,7 @@ protected:
 			if (intersect_lines(line[e], line[(e + 1) & 3], a.pt[e]) == 0)
 				return 0;
 
-		if (!identify_and_rotate(&a))
+		if (!identify_and_rotate(&a, frame))
 			return 0;
 
 		// printf("found aruco %d\n", a.aruco_idx);
@@ -899,7 +903,7 @@ protected:
 	}
 
 
-	int process_aruco(int idx)
+	int process_aruco(int idx, Frame &frame)
 	{
 		segment_t *seg;
 		int i, seg_idx, f, l, y;
@@ -962,15 +966,15 @@ protected:
 		build_edge_points();
 
 		//printf("------------------ aruco %d --------------------\n", idx);
-		return compute_aruco_points();
+		return compute_aruco_points(frame);
 	}
 
-	void process_finish(void)
+	void process_finish(Frame &frame)
 	{
 		arucos_found = 0;
 		for (int i = 0; i < aruco_count; i++) {
 			if (aruco_seg_count[i] != -1)
-				process_aruco(i);
+				process_aruco(i, frame);
 		}
 	}
 

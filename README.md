@@ -2,13 +2,15 @@
 
 ArucoLite is a library that processes an image to find ArUco barcodes in it and extract their corner positions. Unlike libraries like OpenCV, ArucoLite tries to use as little memory as possible.
 
-To process a 324x324 image, it uses around 25kB of memory, plus the space needed to store the frame (~102.5kB). As this was designed to run on micro-controllers, it doesn't use any dynamic memory allocation and all the memory used is part of the ArucoLite object.
+To process a 324x324 image, it uses around 25kB of memory. As this was designed to run on micro-controllers, it doesn't use any dynamic memory allocation and all the memory used is part of the ArucoLite object. The class is designed as a template so that all the structure sizes and code can be optimized at compile time for the required frame size.
 
-The library was also optimized for performance, and processes a 324x324 image on a RP2040 in about 60ms (exact timing depends on the image contents).
+The ArucoLite class defines a "Frame" type that can be used to create a frame buffer to store an image to be processed by the library. By using this type, user code can define more than one frame object and use it to do double buffering, by capturing to one object using DMA while the library processes the image in the other object. This is an incompatible change with version 1, but it was necessary to allow more efficient buffering modes.
+
+The library was also optimized for performance, and processes a 324x324 image on a RP2040 at 250MHz in about 22ms (exact timing depends on the image contents).
 
 You may have noticed that the 324x324 number seems oddly peculiar. That's because it's the resolution of the HM01B0 camera for which there are breakout boards available and some Pi Pico compatible boards that already include the camera sensor.
 
-The library was only tested with small resolutions and it has known limitations that mean it won't work properly with resolutions above around 640 pixels in either dimension.
+The library was only tested with small resolutions but in theory it should adapt to the resolution requested.
 
 
 ## Usage
@@ -55,20 +57,28 @@ A small example code looks like this:
 // include the header file after selecting the aruco database to use
 #include <ArucoLite.h>
 
+// declare the type to be used with the resolution and parameters we want
+typedef ArucoLite<324, 324, 16, false> MyAruco_t;
+
 // declare an ArucoLite object as a global object. Don't declare
 // it on the stack as it will likely use too much stack
-ArucoLite<324, 324, false> Aruco;
+static MyAruco_t Aruco;
+
+// create one or more frame objects to store the frame captured by
+// the camera
+static MyAruco_t::Frame frame;
+
 
 setup() {
         // nothing to do here, the object doesn't require initialization
 }
 
 loop() {
-        // capture image from the camera into the "frame" field
-        camera_capture(Aruco.frame);
+        // capture image from the camera into the "frame" object
+        camera_capture(frame);
 
         // call process to find aruco
-        Aruco.process();
+        Aruco.process(frame);
 
         // check the results and print the data of the aruco's found
         printf("found %d arucos\n", Aruco.arucos_found);

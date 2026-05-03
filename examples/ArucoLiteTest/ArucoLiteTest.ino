@@ -8,8 +8,14 @@
 // include a constant array with the test frame
 #include "test_frame.h"
 
-// declare an ArucoLite object, with the resolution of the test image
-ArucoLite<324, 324, 16, false> Aruco;
+// declare the type to be used with the resolution of the test image
+typedef ArucoLite<324, 324, 16, false> MyAruco_t;
+
+// declare an ArucoLite object
+static MyAruco_t Aruco;
+
+// declare one frame
+static MyAruco_t::Frame frame;
 
 void setup(void)
 {
@@ -20,11 +26,11 @@ void loop(void)
   // copy the test frame to the ArucoLite object frame. On a real application
   // with a camera, ideally the camera would be setup to DMA the image data
   // directly into the frame, thus avoiding the memcpy completely
-  memcpy(Aruco.frame[0], test_frame, sizeof(test_frame));
+  memcpy(frame.data[0], test_frame, sizeof(test_frame));
 
   // call process and measure the processing time
   unsigned long time = micros();
-  Aruco.process();
+  Aruco.process(frame);
   time = micros() - time;
 
   // print the high level information
