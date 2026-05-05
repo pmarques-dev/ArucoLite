@@ -86,7 +86,7 @@ struct aruco_t {
 	// corner point coordinates on the image (floating point, subpixel)
 	pt2d_t pt[4];
 	// integer id of this aruco on the database
-	int aruco_idx;
+	uint32_t aruco_idx;
 };
 
 template <int FRAME_WIDTH, int FRAME_HEIGHT, int MAX_ARUCO_COUNT = 16, bool DEBUG = false>
@@ -694,6 +694,26 @@ protected:
 	}
 
 
+	int get_bmp_pixel(uint8_t *bmp, int x, int y) {
+		int bit = y * ARUCO_BITS + x;
+		return (bmp[bit / 8] & (128 >> (bit & 7))) != 0;
+	}
+
+	void set_bmp_pixel(uint8_t *bmp, int x, int y) {
+		int bit = y * ARUCO_BITS + x;
+		bmp[bit / 8] |= (128 >> (bit & 7));
+	}
+
+	void rotate_bmp(uint8_t *bmp) {
+		uint8_t temp[DB_BYTES];
+		memset(temp, 0, sizeof(temp));
+		for (int y = 0; y < ARUCO_BITS; y++)
+			for (int x = 0; x < ARUCO_BITS; x++)
+				if (get_bmp_pixel(bmp, x, y))
+					set_bmp_pixel(temp, ARUCO_BITS - 1 - y, x);
+		memcpy(bmp, temp, sizeof(temp));
+	}
+
 	void rotate_corners(aruco_t *a, int rotation) {
 		if (rotation == 0)
 			return;
@@ -705,6 +725,38 @@ protected:
 
 	bool search_and_rotate(aruco_t *a, uint8_t *bmp)
 	{
+	#ifdef ARUCO_CODE32
+		// rotate the bitmap until the top left corner is white
+		int rot = 0;
+		for (rot = 0; rot < 4; rot++) {
+			if (get_bmp_pixel(bmp, 0, 0))
+				break;
+			// if we rotated 4 times and couldn't find it, give up
+			if (rot == 3)
+				return false;
+			rotate_bmp(bmp);
+		}
+		// verify that the other corners are black, reject if not
+		if (get_bmp_pixel(bmp, 0, 5) ||
+		    get_bmp_pixel(bmp, 5, 0) ||
+		    get_bmp_pixel(bmp, 5, 5))
+			return false;
+
+		// rotate the corner coordinates by the same rotation
+		rotate_corners(a, rot);
+
+		// convert the bitmap to the code32 by dropping the corner bits
+		a->aruco_idx =
+			((bmp[0] & 0x78) << 25) |
+			((bmp[0] & 0x3) << 26) |
+			(bmp[1] << 18) |
+			(bmp[2] << 10) |
+			((bmp[3] & 0xFC) << 2) |
+			((bmp[3] & 0x01) << 3) |
+			((bmp[4] & 0xE0) >> 5);
+		return true;
+
+	#else
 		for (int i = 0; i < ARUCO_DB_SIZE; i++) {
 			for (int j = 0; j < 4; j++) {
 				if (memcmp(bmp, database[i][j], DB_BYTES) == 0) {
@@ -714,6 +766,8 @@ protected:
 				}
 			}
 		}
+	#endif
+
 		return false;
 	}
 
@@ -733,16 +787,13 @@ protected:
 	// etc.)
 	bool identify_and_rotate(aruco_t *a, Frame &frame) {
 		pt2d_t vec[2], e[2], v, p;
-		int i, j, ix, iy;
-		int b, bit, b_idx, sample;
+		int i, j, ix, iy, sample;
 		uint8_t bmp[DB_BYTES];
+		memset(bmp, 0, sizeof(bmp));
 
 		vec[0] = (a->pt[3] - a->pt[0]) * (1.0f / (TOTAL_BITS * 2));
 		vec[1] = (a->pt[2] - a->pt[1]) * (1.0f / (TOTAL_BITS * 2));
 
-		bit = 128;
-		b_idx = 0;
-		b = 0;
 		for (i = 0; i < TOTAL_BITS; i++) {
 			e[0] = a->pt[0] + vec[0] * (i * 2 + 1);
 			e[1] = a->pt[1] + vec[1] * (i * 2 + 1);
@@ -770,22 +821,9 @@ protected:
 				} else {
 					debug_plot(ix, iy, ADP_MARKER_COLOR);
 					if (sample)
-						b |= bit;
-					bit >>= 1;
-					if (bit == 0) {
-						bit = 128;
-						bmp[b_idx] = b;
-						b_idx++;
-						b = 0;
-					}
+						set_bmp_pixel(bmp, j - 1, i - 1);
 				}
 			}
-		}
-
-		const int reminder = ((ARUCO_BITS * ARUCO_BITS) & 7);
-		if (reminder != 0) {
-			b >>= (8 - reminder);
-			bmp[b_idx] = b;
 		}
 
 		return search_and_rotate(a, bmp);

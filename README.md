@@ -97,3 +97,27 @@ For a more complete example, check the example code that comes with the library.
 After calling process(), the number of arucos found is stored in ```arucos_found``` and the detail of each aruco is stored in the ```result``` array. Each entry in the array has the id of the aruco (its index in the database) and the X/Y position of each of the 4 corners of the aruco. The library rotates the aruco appropriately so that, no matter what the position of the aruco is in the image, the 4 corners identified are always the same on the barcode.
 
 The X/Y coordinates of the corners are floating point numbers, because the library tries to determine the corner positions with sub-pixel resolution. The top left of the image is coord (0,0) and bottom right is (width,height). The middle of the top left pixel is (0.5,0.5).
+
+
+## CODE32 (Experimental)
+
+CODE32 aruco is an experimental feature that uses a 32 bit mask to write the interior bits of a 6x6 aruco. The idea is to allow the user to explore different formats, error correction methods, etc., without having to produce a database and/or change the library in any way.
+
+The inner corners of the aruco are fixed, with the top left being white and the others all black. This way the library can detect rotation and process it like it does for all other aruco formats.
+
+The aruco is built like this:
+
+|  |  |  |  |  |  |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| **white** | b31 | b30 | b29 | b28 | **black** |
+| b27 | b26 | b25 | b24 | b23 | b22 |
+| b21 | b20 | b19 | b18 | b17 | b16 |
+| b15 | b14 | b13 | b12 | b11 | b10 |
+| b09 | b08 | b07 | b06 | b05 | b04 |
+| **black** | b03 | b02 | b01 | b00 | **black** |
+
+where b31 is the most significant bit of the 32 bit mask and b0 is the least significant bit.
+
+The CODE32 arucos can be generated using the aruco-database-converter utility (also available on github) that can generate an SVG file with multiple arucos on the same document. When the library recognizes a CODE32 aruco it returns the same 32 bit number that was passed to the aruco-database-converter utility to generate the image.
+
+Note that a 6x6 aruco database is computed to space the arucos evenly in binary space to maximize the hamming distance between any two arucos. This means that a misread bit (or a few bits) in one aruco should not allow it to be confused with another aruco on the same database. This is not the case for CODE32. It is the user that must implement its own strategy to avoid incorrect readings, as the library will just return whatever it reads, even if it is misreading some bits. This is kind of the point of this format.
