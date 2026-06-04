@@ -120,4 +120,10 @@ where b31 is the most significant bit of the 32 bit mask and b0 is the least sig
 
 The CODE32 arucos can be generated using the aruco-database-converter utility (also available on github) that can generate an SVG file with multiple arucos on the same document. When the library recognizes a CODE32 aruco it returns the same 32 bit number that was passed to the aruco-database-converter utility to generate the image.
 
-Note that a 6x6 aruco database is computed to space the arucos evenly in binary space to maximize the hamming distance between any two arucos. This means that a misread bit (or a few bits) in one aruco should not allow it to be confused with another aruco on the same database. This is not the case for CODE32. It is the user that must implement its own strategy to avoid incorrect readings, as the library will just return whatever it reads, even if it is misreading some bits. This is kind of the point of this format.
+Note that a 6x6 aruco database is computed to space the arucos evenly in binary space to maximize the hamming distance between any two arucos. This means that a misread bit (or a few bits) in one aruco should not allow it to be confused with another aruco on the same database.
+
+CODE32 applies a pseudo-random 32bit bijective transformation to make it more likely that a code that is misread in the image produces an invalid code ofr the application.
+
+For instance, let's say the application produces two arucos with code 2 and 3. If encoded directly, a single bit error could misread one as the other. However, code 2 is encoded as 0xfa59460e and code 3 as 0x21a87429. A single bit error is very unlikely to produce a valid code.
+
+In theory the robustness of this method depends only on the number of valid codes. Since there are 2^32 possible codes, the probability of a misread code returning one of N valid codes is N / 2^32. For instance, if the application has 4295 valid codes, there is a one in a million chance of misreading a code.

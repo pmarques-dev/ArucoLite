@@ -723,6 +723,20 @@ protected:
 			a->pt[e] = tmp[(e + 4 - rotation) & 3];
 	}
 
+	// decode function used to convert an aruco code32 back to raw mask
+	uint32_t decode(uint32_t x)
+	{
+		x ^= x >> 17;
+		x *= 0xed5ad4bb;
+		x ^= x >> 11;
+		x *= 0xac4c1b51;
+		x ^= x >> 15;
+		x *= 0x31848bab;
+		x ^= x >> 14;
+		x ^= 0x35b512d6;
+		return x;
+	}
+
 	bool search_and_rotate(aruco_t *a, uint8_t *bmp)
 	{
 	#ifdef ARUCO_CODE32
@@ -746,14 +760,15 @@ protected:
 		rotate_corners(a, rot);
 
 		// convert the bitmap to the code32 by dropping the corner bits
-		a->aruco_idx =
+		a->aruco_idx = decode(
 			((bmp[0] & 0x78) << 25) |
 			((bmp[0] & 0x3) << 26) |
 			(bmp[1] << 18) |
 			(bmp[2] << 10) |
 			((bmp[3] & 0xFC) << 2) |
 			((bmp[3] & 0x01) << 3) |
-			((bmp[4] & 0xE0) >> 5);
+			((bmp[4] & 0xE0) >> 5));
+
 		return true;
 
 	#else
