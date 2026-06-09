@@ -135,11 +135,13 @@ protected:
 	static constexpr int FRAME_SIZE = FRAME_WIDTH * FRAME_HEIGHT;
 	static constexpr int USABLE_SIZE = USABLE_WIDTH * USABLE_HEIGHT;
 
+	static constexpr int LARGE_DIM = std::max(FRAME_WIDTH, FRAME_HEIGHT);
+
 	// constants related to local contrast --------------------------------
 	static constexpr int CELL = 8;
 	static constexpr int GRID_X = USABLE_WIDTH / CELL;
 	static constexpr int GRID_Y = USABLE_HEIGHT / CELL;
-	static constexpr int DELTA = 5;
+	static constexpr int DELTA = LARGE_DIM / 64;
 
 	// constants related to edge processing --------------------------------
 	static constexpr int MAX_EDGE_PTS = USABLE_HEIGHT * 4;
@@ -150,7 +152,7 @@ protected:
 	// maximum number of arucos we can try to find in one frame. Note that
 	// this includes early processing of black areas that don't end up
 	// looking like arucos at all
-	static constexpr int MAX_ARUCOS = USABLE_SIZE / 850;
+	static constexpr int MAX_ARUCOS = std::min(USABLE_SIZE / 850, 65535);
 
 	// maximum number of segments we can find in one frame
 	static constexpr int MAX_SEGMENTS = USABLE_SIZE / 50;
@@ -167,11 +169,15 @@ protected:
 	// image tha has a segment every 4 pixels, which would be quite dense
 	using segment_index_t = std::conditional_t<(MAX_SEGMENTS < 32768), int16_t, int32_t>;
 
+	// HI-RES: to save space the maximum number of "arucos" depends on the
+	// image size
+	using aruco_index_t = std::conditional_t<(MAX_ARUCOS < 256), uint8_t, uint16_t>;
+
 	struct segment_t {
 		uint16_t y;
 		uint16_t start;
 		length_t length;
-		uint8_t aruco;
+		aruco_index_t aruco;
 		segment_index_t next;
 	};
 
@@ -190,7 +196,7 @@ protected:
 			segment_t segments[MAX_SEGMENTS];
 			int segment_count, free_segment;
 
-			int16_t arucos[MAX_ARUCOS], aruco_seg_count[MAX_ARUCOS];
+			segment_index_t arucos[MAX_ARUCOS], aruco_seg_count[MAX_ARUCOS];
 			int aruco_count, free_aruco;
 
 			line_segments_t previous_line, new_line;
@@ -273,8 +279,8 @@ protected:
 				if (gx > GRID_X - DELTA - 1)
 					gx = GRID_X - DELTA - 1;
 
-				avg = (get_lc_sum(gy-5, gx-5) + get_lc_sum(gy+5, gx+5) -
-					get_lc_sum(gy-5, gx+5) - get_lc_sum(gy+5, gx-5)) /
+				avg = (get_lc_sum(gy-DELTA, gx-DELTA) + get_lc_sum(gy+DELTA, gx+DELTA) -
+					get_lc_sum(gy-DELTA, gx+DELTA) - get_lc_sum(gy+DELTA, gx-DELTA)) /
 					((DELTA * 2 + 1) * (DELTA * 2 + 1) * (CELL*CELL));
 
 				// a perfect average would be "( * 256) >> 8",
@@ -881,8 +887,10 @@ protected:
 		// ideally total should be the edge_count minus the corner points that
 		// should be at most ANGLE_DELTA*2+1 per corner. In practice some points
 		// from the corner area are still considered to be part of the edge, so
-		// if we have less points than the minimum, it is probably not an aruco
-		if (total < edge_count - (ANGLE_DELTA * 2 + 1) * 4)
+		// if we have less points than the minimum, it is probably not an aruco.
+		// on large images, we can have rounded, out of focus corners on large
+		// arucos, so we must tolerate some more bad points
+		if (total < edge_count - ((ANGLE_DELTA * 2 + 1) * 4 - 20 + FRAME_WIDTH / 20))
 			return 0;
 
 		// sort the edges by angle, so that we get the edges in counter
@@ -998,12 +1006,14 @@ protected:
 			return 0;
 
 		// if there are sudden jumps at the border, it's not an aruco
-		for (i = y_start + 5; i < y_end - 5; i++) {
-			if (abs(first[i] - first[i+1]) > 50)	//PARAM
-				return 0;
-			if (abs(last[i] - last[i+1]) > 50)	//PARAM
-				return 0;
-		}
+		// this criteria was rejecting valid arucos that are almost
+		// aligned with the image axis
+		//for (i = y_start + 5; i < y_end - 5; i++) {
+		//	if (abs(first[i] - first[i+1]) > FRAME_WIDTH / 8)	//PARAM
+		//		return 0;
+		//	if (abs(last[i] - last[i+1]) > FRAME_WIDTH / 8)	//PARAM
+		//		return 0;
+		//}
 
 		// if it's too thin, it's not a good aruco
 		f = 0;

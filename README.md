@@ -2,15 +2,13 @@
 
 ArucoLite is a library that processes an image to find ArUco barcodes in it and extract their corner positions. Unlike libraries like OpenCV, ArucoLite tries to use as little memory as possible.
 
-To process a 324x324 image, it uses around 25kB of memory. As this was designed to run on micro-controllers, it doesn't use any dynamic memory allocation and all the memory used is part of the ArucoLite object. The class is designed as a template so that all the structure sizes and code can be optimized at compile time for the required frame size.
+To process a 324x324 image, it uses around 30kB of memory, and as a general rule it uses less than 30% of the image size for its internal structures. As this was designed to run on micro-controllers, it doesn't use any dynamic memory allocation and all the memory used is part of the ArucoLite object. The class is designed as a template so that all the structure sizes and code can be optimized at compile time for the required frame size.
 
 The ArucoLite class defines a "Frame" type that can be used to create a frame buffer to store an image to be processed by the library. By using this type, user code can define more than one frame object and use it to do double buffering, by capturing to one object using DMA while the library processes the image in the other object. This is an incompatible change with version 1, but it was necessary to allow more efficient buffering modes.
 
 The library was also optimized for performance, and processes a 324x324 image on a RP2040 at 250MHz in about 22ms (exact timing depends on the image contents).
 
 You may have noticed that the 324x324 number seems oddly peculiar. That's because it's the resolution of the HM01B0 camera for which there are breakout boards available and some Pi Pico compatible boards that already include the camera sensor.
-
-The library was only tested with small resolutions but in theory it should adapt to the resolution requested.
 
 
 ## Usage
@@ -122,8 +120,10 @@ The CODE32 arucos can be generated using the aruco-database-converter utility (a
 
 Note that a 6x6 aruco database is computed to space the arucos evenly in binary space to maximize the hamming distance between any two arucos. This means that a misread bit (or a few bits) in one aruco should not allow it to be confused with another aruco on the same database.
 
-CODE32 applies a pseudo-random 32bit bijective transformation to make it more likely that a code that is misread in the image produces an invalid code ofr the application.
+CODE32 applies a pseudo-random 32bit bijective transformation to make it more likely that a code that is misread in the image produces an invalid code for the application.
 
 For instance, let's say the application produces two arucos with code 2 and 3. If encoded directly, a single bit error could misread one as the other. However, code 2 is encoded as 0xfa59460e and code 3 as 0x21a87429. A single bit error is very unlikely to produce a valid code.
 
 In theory the robustness of this method depends only on the number of valid codes. Since there are 2^32 possible codes, the probability of a misread code returning one of N valid codes is N / 2^32. For instance, if the application has 4295 valid codes, there is a one in a million chance of misreading a code.
+
+To use this mode, set ARUCO_DB to "ARUCO_6x6_CODE32".
