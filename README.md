@@ -34,7 +34,7 @@ After including the ArucoLite.h header file, you must declare an ArucoLite objec
 
 **int width**, **int height**: dimension of the image to be processed
 **int max_arucos**: maximum number of arucos that can be detected on a single frame
-**bool debug**: run in debug mode, producing a debug frame that shows the features detected on the image (edges, corners, bit positions, etc.). This uses more memory (an extra frame) and more processing time
+**bool debug**: run in debug mode, producing a debug frame that shows the features detected on the image (edges, corners, bit positions, etc.). For more details, see section "Debug mode" below
 
 A small example code looks like this:
 
@@ -96,6 +96,16 @@ After calling process(), the number of arucos found is stored in ```arucos_found
 
 The X/Y coordinates of the corners are floating point numbers, because the library tries to determine the corner positions with sub-pixel resolution. The top left of the image is coord (0,0) and bottom right is (width,height). The middle of the top left pixel is (0.5,0.5).
 
+
+## Debug mode
+
+When the "debug" template parameter is set to true, the ArucoLite object will include a "uint8_t debug_frame[height][width]" that contains an image showing the features captured by the algorithm, like what's shown on the right side of this image:
+
+![](images/example.png)
+
+To get an RGB image from the debug frame, treat each element of the frame as an index into the "debug_colors" array that contains the corresponding RGB colors.
+
+Turning on debug will slow down processing and use more memory, but it can be useful while trying to understand why some aruco is not being recognized by the library.
 
 ## CODE32 (Experimental)
 
